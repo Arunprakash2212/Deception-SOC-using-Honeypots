@@ -1,0 +1,36 @@
+# =============================================================================
+# Brute Force Detection Rules
+# =============================================================================
+
+# SSH brute force - rapid auth failures
+alert tcp any any -> $HOME_NET 22 (msg:"DECEPTION - SSH Brute Force Rapid Auth"; \
+    flags:S,12; \
+    flow:stateless; \
+    threshold: type both, track by_src, count 10, seconds 30; \
+    classtype:attempted-admin; \
+    sid:1000010; rev:1;)
+
+# FTP brute force detection
+alert tcp any any -> $HOME_NET 21 (msg:"DECEPTION - FTP Brute Force Detected"; \
+    flags:S,12; \
+    flow:stateless; \
+    threshold: type both, track by_src, count 5, seconds 60; \
+    classtype:attempted-admin; \
+    sid:1000011; rev:1;)
+
+# HTTP basic auth brute force
+alert http any any -> $HOME_NET any (msg:"DECEPTION - HTTP Auth Brute Force Detected"; \
+    flow:established,to_server; \
+    content:"Authorization"; http_header; \
+    threshold: type both, track by_src, count 10, seconds 30; \
+    classtype:attempted-admin; \
+    sid:1000012; rev:1;)
+
+# HTTP login form brute force (POST to login endpoints)
+alert http any any -> $HOME_NET any (msg:"DECEPTION - HTTP Login Brute Force Detected"; \
+    flow:established,to_server; \
+    http_method; content:"POST"; \
+    http_uri; content:"login"; nocase; \
+    threshold: type both, track by_src, count 10, seconds 60; \
+    classtype:attempted-admin; \
+    sid:1000013; rev:1;)

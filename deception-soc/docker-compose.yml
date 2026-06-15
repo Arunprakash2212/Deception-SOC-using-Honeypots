@@ -1,0 +1,222 @@
+# =============================================================================
+# Deception-SOC Docker Compose
+# =============================================================================
+# Complete deployment of all 6 microservices + supporting infrastructure
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ---------------------------------------------------------------------------
+  # Suricata IDS — Network traffic analysis
+  # ---------------------------------------------------------------------------
+  suricata:
+    image: jasonish/suricata:latest
+    container_name: deception-suricata
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_NICE
+    volumes:
+      - ./detection-engine/suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
+      - ./detection-engine/suricata/rules/:/etc/suricata/rules/:ro
+      - suricata-logs:/var/log/suricata/
+    command: -i eth0 --set classification-file=/etc/suricata/classification.config
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Log Watcher — Monitors Suricata logs, forwards to Orchestrator
+  # ---------------------------------------------------------------------------
+  log-watcher:
+    build:
+      context: ./detection-engine
+      dockerfile: Dockerfile
+    container_name: deception-log-watcher
+    depends_on:
+      - orchestrator
+    volumes:
+      - suricata-logs:/var/log/suricata/:ro
+    environment:
+      ORCHESTRATOR_URL: http://orchestrator:8000
+      SURICATA_LOG_DIR: /var/log/suricata/
+    networks:
+      - deception-internal
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Elasticsearch — Data storage
+  # ---------------------------------------------------------------------------
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: deception-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - cluster.name=deception-soc
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks:
+      - deception-internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Kibana — Elasticsearch visualization (optional)
+  # ---------------------------------------------------------------------------
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: deception-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - deception-internal
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Logger — Central session logging service
+  # ---------------------------------------------------------------------------
+  logger:
+    build:
+      context: ./logger
+      dockerfile: Dockerfile
+    container_name: deception-logger
+    ports:
+      - "9000:9000"
+    environment:
+      ELASTICSEARCH_HOST: http://elasticsearch:9200
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - deception-internal
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Orchestrator — Central brain
+  # ---------------------------------------------------------------------------
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: deception-orchestrator
+    ports:
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      ELASTICSEARCH_HOST: http://elasticsearch:9200
+      LOGGER_URL: http://logger:9000
+      AI_URL: http://ai-module:8500
+      HONEYPOT_NETWORK: deception-net
+      HONEYPOT_SUBNET: "172.20.0"
+      MAX_HONEYPOTS: "20"
+      MAX_SESSION_DURATION: "3600"
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      logger:
+        condition: service_started
+    networks:
+      - deception-internal
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # AI Module — Attacker classification and threat scoring
+  # ---------------------------------------------------------------------------
+  ai-module:
+    build:
+      context: ./ai-module
+      dockerfile: Dockerfile
+    container_name: deception-ai-module
+    ports:
+      - "8500:8500"
+    environment:
+      ELASTICSEARCH_HOST: http://elasticsearch:9200
+      MODEL_DIR: /app/models
+    volumes:
+      - ai-models:/app/models
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - deception-internal
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Dashboard Backend — API aggregation proxy
+  # ---------------------------------------------------------------------------
+  dashboard-backend:
+    build:
+      context: ./dashboard/backend
+      dockerfile: Dockerfile
+    container_name: deception-dashboard-backend
+    ports:
+      - "3001:3001"
+    environment:
+      ORCHESTRATOR_URL: http://orchestrator:8000
+      LOGGER_URL: http://logger:9000
+      AI_URL: http://ai-module:8500
+    depends_on:
+      - orchestrator
+      - logger
+      - ai-module
+    networks:
+      - deception-internal
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Dashboard Frontend — React analyst dashboard
+  # ---------------------------------------------------------------------------
+  dashboard-frontend:
+    build:
+      context: ./dashboard/frontend
+      dockerfile: Dockerfile
+    container_name: deception-dashboard-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - dashboard-backend
+    networks:
+      - deception-internal
+    restart: unless-stopped
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  suricata-logs:
+    driver: local
+  es-data:
+    driver: local
+  ai-models:
+    driver: local
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  deception-internal:
+    driver: bridge
+
+  deception-net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

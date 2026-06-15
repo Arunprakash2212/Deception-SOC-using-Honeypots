@@ -1,0 +1,48 @@
+# =============================================================================
+# Custom Deception Rules - Advanced Attack Pattern Detection
+# =============================================================================
+
+# Remote code execution attempt via command injection
+alert http any any -> $HOME_NET any (msg:"DECEPTION - Command Injection Attempt"; \
+    flow:established,to_server; \
+    content:"|3b|"; \
+    content:"cat"; nocase; \
+    classtype:web-application-attack; \
+    sid:1000020; rev:1;)
+
+# Path traversal attempt
+alert http any any -> $HOME_NET any (msg:"DECEPTION - Path Traversal Attempt"; \
+    flow:established,to_server; \
+    content:"../"; \
+    threshold: type both, track by_src, count 3, seconds 30; \
+    classtype:web-application-attack; \
+    sid:1000021; rev:1;)
+
+# WordPress scan detection
+alert http any any -> $HOME_NET any (msg:"DECEPTION - WordPress Scan Detected"; \
+    flow:established,to_server; \
+    content:"wp-"; http_uri; nocase; \
+    threshold: type both, track by_src, count 3, seconds 30; \
+    classtype:attempted-recon; \
+    sid:1000022; rev:1;)
+
+# PHPMyAdmin scan detection
+alert http any any -> $HOME_NET any (msg:"DECEPTION - PHPMyAdmin Scan Detected"; \
+    flow:established,to_server; \
+    content:"phpmyadmin"; http_uri; nocase; \
+    classtype:attempted-recon; \
+    sid:1000023; rev:1;)
+
+# Reverse shell attempt detection
+alert tcp $HOME_NET any -> any any (msg:"DECEPTION - Possible Reverse Shell"; \
+    flow:established,to_server; \
+    content:"/bin/sh"; \
+    classtype:trojan-activity; \
+    sid:1000024; rev:1;)
+
+# DNS tunneling detection (large TXT queries)
+alert dns any any -> any any (msg:"DECEPTION - Possible DNS Tunneling"; \
+    dns_query; \
+    content:"."; offset:50; \
+    classtype:policy-violation; \
+    sid:1000025; rev:1;)

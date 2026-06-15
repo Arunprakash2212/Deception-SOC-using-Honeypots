@@ -1,0 +1,58 @@
+# =============================================================================
+# Deception-SOC Network Topology
+# =============================================================================
+# This file documents the network architecture of the deception system.
+#
+# Networks:
+#   deception-internal (bridge):
+#     Purpose: Inter-service communication
+#     Subnet: auto-assigned by Docker
+#     Services: orchestrator, logger, ai-module, elasticsearch,
+#               kibana, dashboard-backend
+#
+#   deception-net (bridge, internal=true):
+#     Purpose: Isolated honeypot network (NO internet access)
+#     Subnet: 172.20.0.0/16
+#     Gateway: 172.20.0.1
+#     Services: dynamically deployed honeypot containers
+#     Security: internal=true prevents outbound internet access
+#
+# Traffic Flow:
+#   1. Attacker → Real server (port 22/80/21)
+#   2. Suricata detects attack pattern → eve.json alert
+#   3. Log Watcher reads alert → POSTs to Orchestrator
+#   4. Orchestrator deploys honeypot on deception-net
+#   5. Orchestrator adds iptables DNAT rule
+#   6. Attacker traffic redirected → honeypot (172.20.0.x)
+#   7. Honeypot logs session → Logger → Elasticsearch
+#   8. Dashboard queries all services for display
+#
+# =============================================================================
+
+networks:
+  deception-internal:
+    description: "Internal service communication network"
+    driver: bridge
+    attachable: true
+
+  deception-net:
+    description: "Isolated honeypot network — no internet access"
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+
+# IP Assignments (honeypots are dynamic, starting from 172.20.0.10):
+#   172.20.0.1   — Gateway
+#   172.20.0.10+ — Dynamically assigned to honeypot containers
+#
+# Service Ports:
+#   8000  — Orchestrator API
+#   9000  — Logger API
+#   8500  — AI Module API
+#   9200  — Elasticsearch
+#   5601  — Kibana
+#   3001  — Dashboard Backend
+#   3000  — Dashboard Frontend

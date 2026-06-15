@@ -1,0 +1,189 @@
+%YAML 1.1
+---
+# =============================================================================
+# Suricata Configuration for Deception-SOC
+# =============================================================================
+
+vars:
+  address-groups:
+    HOME_NET: "[10.0.0.0/8,172.16.0.0/12,192.168.0.0/16]"
+    EXTERNAL_NET: "!$HOME_NET"
+    HTTP_SERVERS: "$HOME_NET"
+    DNS_SERVERS: "$HOME_NET"
+
+  port-groups:
+    HTTP_PORTS: "80"
+    SSH_PORTS: "22"
+    FTP_PORTS: "21"
+
+# Default log directory
+default-log-dir: /var/log/suricata/
+
+# Statistics
+stats:
+  enabled: yes
+  interval: 30
+
+# Output configuration
+outputs:
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      community-id: true
+      types:
+        - alert:
+            payload: yes
+            payload-printable: yes
+            packet: yes
+            metadata: yes
+            http-body: yes
+            http-body-printable: yes
+            tagged-packets: yes
+        - http:
+            extended: yes
+        - dns:
+            query: yes
+            answer: yes
+        - tls:
+            extended: yes
+        - files:
+            force-magic: no
+        - smtp:
+            extended: yes
+        - flow
+        - netflow
+        - stats:
+            totals: yes
+            threads: no
+
+  - fast:
+      enabled: yes
+      filename: fast.log
+      append: yes
+
+# Logging
+logging:
+  default-log-level: notice
+  outputs:
+    - console:
+        enabled: yes
+    - file:
+        enabled: yes
+        level: info
+        filename: suricata.log
+
+# Application layer protocol detection
+app-layer:
+  protocols:
+    http:
+      enabled: yes
+      libhtp:
+        default-config:
+          personality: IDS
+          request-body-limit: 4096
+          response-body-limit: 4096
+    tls:
+      enabled: yes
+    ssh:
+      enabled: yes
+    dns:
+      tcp:
+        enabled: yes
+      udp:
+        enabled: yes
+    ftp:
+      enabled: yes
+    smtp:
+      enabled: yes
+
+# Detection engine settings
+detect:
+  profile: medium
+  custom-values:
+    toclient-groups: 3
+    toserver-groups: 25
+  sgh-mpm-context: auto
+  inspection-recursion-limit: 3000
+
+# Threading
+threading:
+  set-cpu-affinity: no
+
+# Rule files
+default-rule-path: /etc/suricata/rules
+
+rule-files:
+  - scan-detect.rules
+  - bruteforce.rules
+  - custom-deception.rules
+
+# Stream engine
+stream:
+  memcap: 256mb
+  checksum-validation: no
+  inline: auto
+  reassembly:
+    memcap: 512mb
+    depth: 1mb
+    toserver-chunk-size: 2560
+    toclient-chunk-size: 2560
+    randomize-chunk-size: yes
+
+# Host OS policy
+host-os-policy:
+  linux: [0.0.0.0/0]
+
+# Defrag
+defrag:
+  memcap: 32mb
+  hash-size: 65536
+  trackers: 65535
+  max-frags: 65535
+  prealloc: yes
+  timeout: 60
+
+# Flow
+flow:
+  memcap: 128mb
+  hash-size: 65536
+  prealloc: 10000
+  emergency-recovery: 30
+
+# Flow timeouts
+flow-timeouts:
+  default:
+    new: 30
+    established: 300
+    closed: 0
+    bypassed: 100
+    emergency-new: 10
+    emergency-established: 100
+    emergency-closed: 0
+    emergency-bypassed: 50
+  tcp:
+    new: 60
+    established: 600
+    closed: 60
+    bypassed: 100
+  udp:
+    new: 30
+    established: 300
+    bypassed: 100
+  icmp:
+    new: 30
+    established: 300
+
+# Unix command socket
+unix-command:
+  enabled: auto
+
+# Packet acquisition
+af-packet:
+  - interface: eth0
+    threads: auto
+    cluster-id: 99
+    cluster-type: cluster_flow
+    defrag: yes
+    use-mmap: yes
+    tpacket-v3: yes
